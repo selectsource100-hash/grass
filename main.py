@@ -1,158 +1,110 @@
 import os
 import random
-import logging
 import asyncio
-import tempfile
-import json
+import logging
 import threading
-from typing import Dict, Tuple, Optional
-from datetime import datetime
 from flask import Flask
-
-import aiohttp
-import aiofiles
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
-# ===================================================================
-# Configuration
-# ===================================================================
-
+# --- CONFIG ---
 BOT_TOKEN = "8103948431:AAEZgtxTZPA1tvuo8Lc6iA5-UZ7RFiqSzhs"
-ADMIN_IDS = [7504968899]  # Your ID
-TELEGRAM_USERNAME = "@Str_JT" 
+TELEGRAM_USERNAME = "@Str_JT"
 
-MAX_FILE_SIZE = 10 * 1024 * 1024 
-MAX_CARDS_PER_FILE = 500000
-DELAY_BETWEEN_CHECKS = 1.5
-SESSION_TIMEOUT = 30
-CREDITS_FILE = "credits.json"
-RESULTS_DIR = "results"
-os.makedirs(RESULTS_DIR, exist_ok=True)
+# --- RENDER PORT BINDING ---
+app = Flask(__name__)
+@app.route('/')
+def health(): return "BOT ACTIVE", 200
 
-# ===================================================================
-# Flask Server for Render Port Binding
-# ===================================================================
-server = Flask(__name__)
-
-@server.route('/')
-def health():
-    return "Bot is Running", 200
-
-def run_server():
+def run_flask():
     port = int(os.environ.get("PORT", 10000))
-    server.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port)
 
-# ===================================================================
-# Credit System
-# ===================================================================
-def load_credits():
-    if os.path.exists(CREDITS_FILE):
-        with open(CREDITS_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+# --- GLOBAL STATE ---
+stop_flags = {} 
 
-def save_credits(data):
-    with open(CREDITS_FILE, 'w') as f:
-        json.dump(data, f)
-
-user_credits = load_credits()
-
-# ===================================================================
-# Limiter & Stop Logic
-# ===================================================================
-class UserLimiter:
-    def __init__(self):
-        self.user_processing = {}
-        self.stop_requests = {}
-    
-    def is_processing(self, uid): return self.user_processing.get(uid, False)
-    def set_processing(self, uid, state): 
-        self.user_processing[uid] = state
-        if not state: self.stop_requests[uid] = False
-    def request_stop(self, uid): self.stop_requests[uid] = True
-    def should_stop(self, uid): return self.stop_requests.get(uid, False)
-
-limiter = UserLimiter()
-
-# ===================================================================
-# Card Logic
-# ===================================================================
-async def check_card(card_data: str) -> Tuple[str, str]:
-    # Simplified mock for the gateway logic
-    await asyncio.sleep(DELAY_BETWEEN_CHECKS)
-    if random.random() > 0.8:
-        return card_data, "✅ LIVE » Checked"
-    return card_data, "❌ DIE » Declined"
-
-# ===================================================================
-# Bot Setup
-# ===================================================================
+# --- BOT SETUP ---
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-@dp.callback_query(lambda c: c.data == "stop_check")
-async def handle_stop(callback: CallbackQuery):
-    limiter.request_stop(callback.from_user.id)
-    await callback.answer("🛑 Stopping process...")
+# --- UI KEYBOARDS ---
+def stop_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="STOP 🛑", callback_data="stop_process")]
+    ])
 
+# --- HANDLERS ---
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    uid = str(message.from_user.id)
-    bal = user_credits.get(uid, 0)
     await message.answer(
-        f"💳 <b>JT Checkbot</b>\n\n"
-        f"Your Credits: <code>{bal}</code>\n"
-        f"To purchase credits, DM {TELEGRAM_USERNAME}\n\n"
-        "/mtxt - Check file\n/check - Single CC"
+        f"💳 <b>JT Card Checker</b>\n\n"
+        f"To check a list, upload a <code>.txt</code> file and reply to it with <code>/mtxt</code>.\n\n"
+        f"Support: {TELEGRAM_USERNAME}"
     )
 
-@dp.message(Command("setcredits"))
-async def cmd_set(message: Message):
-    if message.from_user.id not in ADMIN_IDS: return
-    try:
-        _, target, amt = message.text.split()
-        user_credits[str(target)] = int(amt)
-        save_credits(user_credits)
-        await message.answer(f"✅ User {target} now has {amt} credits.")
-    except: await message.answer("Use: /setcredits [ID] [Amount]")
+@dp.callback_query(F.data == "stop_process")
+async def handle_stop(callback: CallbackQuery):
+    stop_flags[callback.from_user.id] = True
+    await callback.answer("Stopping current check...")
 
 @dp.message(Command("mtxt"))
-async def cmd_mtxt(message: Message):
-    uid = str(message.from_user.id)
-    if user_credits.get(uid, 0) <= 0:
-        return await message.answer(f"❌ Out of credits. DM {TELEGRAM_USERNAME}")
-    
+async def process_mtxt(message: Message):
     if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.answer("Reply to a .txt file with /mtxt")
+        return await message.answer("❌ Reply to a <code>.txt</code> file with /mtxt")
 
-    limiter.set_processing(message.from_user.id, True)
-    status_msg = await message.answer("⏳ Processing... (Click Stop to cancel)")
+    uid = message.from_user.id
+    stop_flags[uid] = False
     
-    # Process Logic (Deduct 1 credit per file)
-    user_credits[uid] -= 1
-    save_credits(user_credits)
-    
-    stop_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="STOP 🛑", callback_query_data="stop_check")]])
-    await status_msg.edit_text("🔎 Checking cards...", reply_markup=stop_kb)
-    
-    # Simulating a loop that checks for 'should_stop'
-    for i in range(10): 
-        if limiter.should_stop(message.from_user.id):
-            await message.answer("🛑 Checking Cancelled.")
-            break
-        await asyncio.sleep(1)
+    status_msg = await message.answer("🔄 <b>Preparing...</b>", reply_markup=stop_kb())
 
-    await status_msg.edit_text("✅ Done.")
-    limiter.set_processing(message.from_user.id, False)
+    # Result Counters
+    live, charged, die = 0, 0, 0
+    total = 20 # Example count
 
+    for i in range(1, total + 1):
+        if stop_flags.get(uid):
+            await status_msg.edit_text(f"🛑 <b>Checking Stopped.</b>\n\nFinal Stats:\n✅ Live: {live}\n⚡ Charged: {charged}\n❌ Die: {die}")
+            return
+
+        # Mock logic for different results
+        res = random.choice(["live", "charged", "die", "die"]) 
+        if res == "live": live += 1
+        elif res == "charged": charged += 1
+        else: die += 1
+
+        # Periodic UI Update
+        if i % 2 == 0 or i == total:
+            ui_text = (
+                f"🔎 <b>Checking Cards...</b>\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"✅ <b>Live:</b> <code>{live}</code>\n"
+                f"⚡ <b>Charged:</b> <code>{charged}</code>\n"
+                f"❌ <b>Declined:</b> <code>{die}</code>\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"Progress: <code>{i}/{total}</code>"
+            )
+            try:
+                await status_msg.edit_text(ui_text, reply_markup=stop_kb())
+            except: pass # Avoid errors if message hasn't changed
+
+        await asyncio.sleep(1.2) # Checker Delay
+
+    await status_msg.edit_text(
+        f"🏁 <b>Check Completed!</b>\n\n"
+        f"✅ Live: <code>{live}</code>\n"
+        f"⚡ Charged: <code>{charged}</code>\n"
+        f"❌ Declined: <code>{die}</code>"
+    )
+
+# --- MAIN ---
 async def main():
-    threading.Thread(target=run_server, daemon=True).start()
+    threading.Thread(target=run_flask, daemon=True).start()
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     asyncio.run(main())

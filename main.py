@@ -22,8 +22,8 @@ from aiogram.client.default import DefaultBotProperties
 # ===================================================================
 
 BOT_TOKEN = "8103948431:AAEZgtxTZPA1tvuo8Lc6iA5-UZ7RFiqSzhs"
-ADMIN_IDS = [7248171018]  # Your ID
-TELEGRAM_USERNAME = "@selectsource100" 
+ADMIN_IDS = [7504968899]  # Your ID
+TELEGRAM_USERNAME = "@Str_JT" 
 
 MAX_FILE_SIZE = 10 * 1024 * 1024 
 MAX_CARDS_PER_FILE = 500000

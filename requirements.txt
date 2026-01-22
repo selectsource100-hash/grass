@@ -1,2 +1,4 @@
-aiogram==2.25.1
-flask
+aiogram==3.10.0
+aiohttp==3.9.5
+aiofiles==24.1.0
+flask==3.0.3

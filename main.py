@@ -1,43 +1,75 @@
-import asyncio
-import websockets
-import json
-import uuid
+import os
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import asyncio
+from flask import Flask
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
 
-# --- KEEP ALIVE SERVER ---
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Node is Alive")
+# --- 1. WEB SERVER FOR RENDER ---
+app = Flask(__name__)
 
-def run_fake_server():
-    import os
+@app.route('/')
+def health_check():
+    return "Bot is running!", 200
+
+def run_web_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
-    server.serve_forever()
+    app.run(host='0.0.0.0', port=port)
 
-threading.Thread(target=run_fake_server, daemon=True).start()
+# --- 2. TELEGRAM BOT LOGIC ---
+API_TOKEN = '8103948431:AAEZgtxTZPA1tvuo8Lc6iA5-UZ7RFiqSzhs' # Get from @BotFather
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
 
-# --- NODEPAY SCRIPT ---
-USER_ID = "38ac1IpkYWxDOmJn2afZVN5h6tX" # Your ID
+# Simple memory database (Resets on restart)
+# Tip: Connect Supabase or MongoDB later to save data permanently
+user_db = {} 
 
-async def run_node():
-    uri = "wss://nw.nodepay.ai:443/websocket" # Nodepay's address
-    while True:
-        try:
-            async with websockets.connect(uri) as websocket:
-                print("Connected to Nodepay!")
-                # Authenticate and start earning
-                auth_data = {"action": "auth", "data": {"token": USER_ID}}
-                await websocket.send(json.dumps(auth_data))
-                while True:
-                    resp = await websocket.recv()
-                    print(f"Earning Update: {resp}")
-                    await asyncio.sleep(30)
-        except Exception as e:
-            print(f"Connection lost, retrying... {e}")
-            await asyncio.sleep(10)
+@dp.message_handler(commands=['start'])
+async def welcome(message: types.Message):
+    uid = message.from_user.id
+    if uid not in user_db:
+        user_db[uid] = 5  # 5 Free credits for new users
+    
+    await message.reply(
+        "🚀 **Premium Lead Finder Bot**\n\n"
+        "Send a website URL to find business emails.\n"
+        "Each search costs **1 credit**.\n\n"
+        f"💰 Your Balance: {user_db[uid]} credits.\n"
+        "Use /buy to get 50 credits for $5."
+    )
 
-asyncio.run(run_node())
+@dp.message_handler(commands=['buy'])
+async def buy_credits(message: types.Message):
+    # In a real bot, integrate Stripe here. For now, manual payment:
+    await message.reply("💳 To buy credits, send $5 to: `your@paypal.com` and message @admin.")
+
+@dp.message_handler(regexp=r'(http|https)://[^\s]+')
+async def find_leads(message: types.Message):
+    uid = message.from_user.id
+    balance = user_db.get(uid, 0)
+
+    if balance >= 1:
+        user_db[uid] -= 1
+        url = message.text
+        await message.answer(f"🔎 Searching {url} for leads...")
+        
+        # MOCK LOGIC: In a real bot, use a Lead API (like Hunter.io) here
+        await asyncio.sleep(2) 
+        await message.answer(
+            f"✅ **Leads Found for {url}:**\n"
+            "- admin@domain.com\n"
+            "- sales@domain.com\n\n"
+            f"Remaining Credits: {user_db[uid]}"
+        )
+    else:
+        await message.answer("❌ Out of credits! Use /buy to top up.")
+
+# --- 3. START EVERYTHING ---
+if __name__ == '__main__':
+    # Start Web Server in a background thread
+    threading.Thread(target=run_web_server, daemon=True).start()
+    
+    # Start Telegram Bot Polling
+    print("Bot is starting...")
+    executor.start_polling(dp, skip_updates=True)

@@ -1,3 +1,29 @@
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# This creates a tiny web server so Render is happy
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Grass Node is Running!")
+
+def run_fake_server():
+    # Render provides the PORT variable automatically
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    print(f"Fake server started on port {port}")
+    server.serve_forever()
+
+# Start the fake server in a background thread
+threading.Thread(target=run_fake_server, daemon=True).start()
+
+# --- YOUR ORIGINAL GRASS CODE STARTS HERE ---
+import asyncio
+# ... (rest of your script)
+
+
 import asyncio
 import ssl
 import json

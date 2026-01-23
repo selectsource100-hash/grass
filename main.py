@@ -12,7 +12,7 @@ import hashlib
 # Configuration
 BOT_TOKEN = "8046672909:AAHI4bFQF0lr9sf679btwKaPWm_N3XDuEhY"
 ADMIN_IDS = [7504968899]
-MONGO_URI = "mongodb+srv://<botuser>:<johntayler456>@cluster0.hheged6.mongodb.net/?appName=Cluster0"
+MONGO_URI = "mongodb+srv://botuser:johntayler456@cluster0.hheged6.mongodb.net/?appName=Cluster0"
 NOWPAYMENTS_API_KEY = "WQZZBPD-G4MM7ZR-M1YTQ3Q-877VBHV"
 NOWPAYMENTS_IPN_SECRET = "e/A/f2Guz17i8t8tayIWDq9JJGciMDfk"
 
@@ -981,25 +981,17 @@ You now have access to all coins!"""
         return "Error", 500
 
 if __name__ == '__main__':
-    # 1. Start Subscription Checker in background
-    print("⏳ Starting Subscription Checker...")
-    sub_check_thread = Thread(target=check_expired_subscriptions)
-    sub_check_thread.daemon = True
-    sub_check_thread.start()
+    # 1. Start the Bot thread first (Non-blocking)
+    from threading import Thread
+    print("🚀 Starting Bot Thread...")
+    Thread(target=bot_polling, daemon=True).start()
     
-    # 2. Start Price Updates in background
-    print("📊 Starting Price Updates...")
-    update_thread = Thread(target=send_price_updates)
-    update_thread.daemon = True
-    update_thread.start()
-    
-    # 3. Start Telegram Bot Polling in background
-    print("🚀 Starting Telegram Bot...")
-    bot_thread = Thread(target=bot_polling)
-    bot_thread.daemon = True
-    bot_thread.start()
+    # 2. Start the Price Updates thread (Non-blocking)
+    print("📊 Starting Price Update Thread...")
+    Thread(target=send_price_updates, daemon=True).start()
 
-    # 4. RUN FLASK ON THE MAIN THREAD (This blocks the script and keeps it alive)
-    print("🌐 Starting Flask Server on Port 10000...")
+    # 3. Run Flask on the Main Thread (Blocking)
+    # Render requires the main process to bind to the port
     port = int(os.environ.get('PORT', 10000))
+    print(f"🌐 Flask Server starting on port {port}")
     app.run(host='0.0.0.0', port=port)

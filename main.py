@@ -981,23 +981,25 @@ You now have access to all coins!"""
         return "Error", 500
 
 if __name__ == '__main__':
-    # Start Flask
-    flask_thread = Thread(target=lambda: app.run(
-        host='0.0.0.0',
-        port=int(os.environ.get('PORT', 10000))
-    ))
-    flask_thread.daemon = True
-    flask_thread.start()
+    # 1. Start the Telegram Bot in a background thread
+    print("🚀 Starting Telegram Bot thread...")
+    bot_thread = Thread(target=bot_polling)
+    bot_thread.daemon = True
+    bot_thread.start()
     
-    # Start subscription checker
+    # 2. Start the Subscription Checker in a background thread
+    print("⏳ Starting Subscription Checker...")
     sub_check_thread = Thread(target=check_expired_subscriptions)
     sub_check_thread.daemon = True
     sub_check_thread.start()
     
-    # Start price updates
+    # 3. Start the Price Updates in a background thread
+    print("📊 Starting Price Updates...")
     update_thread = Thread(target=send_price_updates)
     update_thread.daemon = True
     update_thread.start()
-    
-    # Start bot
-    bot_polling()
+
+    # 4. Run Flask (This must be LAST because it blocks the script)
+    print("🌐 Starting Flask Server...")
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)

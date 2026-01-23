@@ -827,6 +827,15 @@ def get_updates(offset=0):
         print(f"Error getting updates: {e}")
         return None
 
+def delete_webhook():
+    """Remove any existing webhook so polling works"""
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
+        requests.get(url)
+        print("✅ Webhook reset (Polling enabled)")
+    except Exception as e:
+        print(f"⚠️ Failed to reset webhook: {e}")
+
 def check_expired_subscriptions():
     """Check and notify users with expiring subscriptions"""
     while True:
@@ -886,15 +895,27 @@ def send_price_updates():
 def bot_polling():
     """Main bot polling loop"""
     print("Bot started!")
+    
+    # FIX: Ensure we aren't fighting with a webhook
+    delete_webhook()
+    
     offset = 0
     
     while True:
         try:
             updates = get_updates(offset)
-            if updates and updates.get('ok'):
-                for update in updates.get('result', []):
-                    handle_update(update)
-                    offset = update['update_id'] + 1
+            if updates:
+                if updates.get('ok'):
+                    for update in updates.get('result', []):
+                        handle_update(update)
+                        offset = update['update_id'] + 1
+                else:
+                    # FIX: Print specific error if Telegram refuses connection
+                    print(f"Telegram API Error: {updates.get('description')}")
+                    time.sleep(5)
+            else:
+                time.sleep(1)
+                
         except Exception as e:
             print(f"Polling error: {e}")
             time.sleep(5)

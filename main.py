@@ -12,6 +12,7 @@ import hashlib
 # Configuration
 BOT_TOKEN = "8046672909:AAHI4bFQF0lr9sf679btwKaPWm_N3XDuEhY"
 ADMIN_IDS = [7504968899]
+# FIXED: Removed brackets from URI
 MONGO_URI = "mongodb+srv://botuser:johntayler456@cluster0.hheged6.mongodb.net/?appName=Cluster0"
 NOWPAYMENTS_API_KEY = "WQZZBPD-G4MM7ZR-M1YTQ3Q-877VBHV"
 NOWPAYMENTS_IPN_SECRET = "e/A/f2Guz17i8t8tayIWDq9JJGciMDfk"
@@ -58,13 +59,15 @@ AVAILABLE_COINS = {
 # Database Functions
 def get_user(user_id):
     """Get user from database"""
-    if not db:
+    # FIXED: Explicit None comparison
+    if db is None:
         return None
     return users_col.find_one({'user_id': user_id})
 
 def add_user(user_id, username):
     """Add new user to database"""
-    if not db:
+    # FIXED: Explicit None comparison
+    if db is None:
         return
     
     existing = get_user(user_id)
@@ -99,7 +102,8 @@ def get_subscription_end(user_id):
 
 def extend_subscription(user_id, months):
     """Extend user's subscription by X months"""
-    if not db:
+    # FIXED: Explicit None comparison
+    if db is None:
         return False
     
     user = get_user(user_id)
@@ -135,7 +139,8 @@ def get_subscribed_coins(user_id):
 
 def update_subscribed_coins(user_id, coins):
     """Update user's coin list"""
-    if not db:
+    # FIXED: Explicit None comparison
+    if db is None:
         return
     users_col.update_one(
         {'user_id': user_id},
@@ -163,7 +168,7 @@ def create_payment(user_id, months):
             "price_amount": amount,
             "price_currency": "usd",
             "pay_currency": "usdttrc20",
-            "ipn_callback_url": f"https://YOUR_RENDER_URL.onrender.com/nowpayments_webhook",
+            "ipn_callback_url": f"https://grass-mqib.onrender.com/nowpayments_webhook",
             "order_id": order_id,
             "order_description": f"{months} month(s) premium subscription"
         }
@@ -174,7 +179,8 @@ def create_payment(user_id, months):
             payment_data = response.json()
             
             # Store pending payment
-            if db:
+            # FIXED: Explicit None comparison
+            if db is not None:
                 pending_payments_col.insert_one({
                     'payment_id': payment_data['payment_id'],
                     'user_id': user_id,
@@ -794,7 +800,8 @@ Currently tracking: <b>1/{len(AVAILABLE_COINS)}</b> coins"""
                     send_message(chat_id, msg, get_coins_keyboard(user_id))
             
             elif data == 'admin' and is_admin(user_id):
-                if db:
+                # FIXED: Explicit None comparison
+                if db is not None:
                     total = users_col.count_documents({})
                     premium = users_col.count_documents({'subscription_end': {'$ne': None}})
                 else:
@@ -827,20 +834,12 @@ def get_updates(offset=0):
         print(f"Error getting updates: {e}")
         return None
 
-def delete_webhook():
-    """Remove any existing webhook so polling works"""
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
-        requests.get(url)
-        print("✅ Webhook reset (Polling enabled)")
-    except Exception as e:
-        print(f"⚠️ Failed to reset webhook: {e}")
-
 def check_expired_subscriptions():
     """Check and notify users with expiring subscriptions"""
     while True:
         try:
-            if db:
+            # FIXED: Explicit None comparison
+            if db is not None:
                 # Find users expiring in 3 days
                 three_days = (datetime.now() + timedelta(days=3)).isoformat()
                 expiring = users_col.find({
@@ -875,7 +874,8 @@ def send_price_updates():
     """Send hourly updates to premium users"""
     while True:
         try:
-            if db:
+            # FIXED: Explicit None comparison
+            if db is not None:
                 # Only send to active premium users
                 users = users_col.find({
                     'subscription_end': {'$gte': datetime.now().isoformat()}
@@ -895,27 +895,15 @@ def send_price_updates():
 def bot_polling():
     """Main bot polling loop"""
     print("Bot started!")
-    
-    # FIX: Ensure we aren't fighting with a webhook
-    delete_webhook()
-    
     offset = 0
     
     while True:
         try:
             updates = get_updates(offset)
-            if updates:
-                if updates.get('ok'):
-                    for update in updates.get('result', []):
-                        handle_update(update)
-                        offset = update['update_id'] + 1
-                else:
-                    # FIX: Print specific error if Telegram refuses connection
-                    print(f"Telegram API Error: {updates.get('description')}")
-                    time.sleep(5)
-            else:
-                time.sleep(1)
-                
+            if updates and updates.get('ok'):
+                for update in updates.get('result', []):
+                    handle_update(update)
+                    offset = update['update_id'] + 1
         except Exception as e:
             print(f"Polling error: {e}")
             time.sleep(5)
@@ -947,7 +935,8 @@ def nowpayments_webhook():
         
         if payment_status == 'finished':
             # Find pending payment
-            if db:
+            # FIXED: Explicit None comparison
+            if db is not None:
                 pending = pending_payments_col.find_one({'payment_id': payment_id})
                 
                 if pending:
@@ -981,17 +970,23 @@ You now have access to all coins!"""
         return "Error", 500
 
 if __name__ == '__main__':
-    # 1. Start the Bot thread first (Non-blocking)
-    from threading import Thread
-    print("🚀 Starting Bot Thread...")
-    Thread(target=bot_polling, daemon=True).start()
+    # Start Flask
+    flask_thread = Thread(target=lambda: app.run(
+        host='0.0.0.0',
+        port=int(os.environ.get('PORT', 10000))
+    ))
+    flask_thread.daemon = True
+    flask_thread.start()
     
-    # 2. Start the Price Updates thread (Non-blocking)
-    print("📊 Starting Price Update Thread...")
-    Thread(target=send_price_updates, daemon=True).start()
-
-    # 3. Run Flask on the Main Thread (Blocking)
-    # Render requires the main process to bind to the port
-    port = int(os.environ.get('PORT', 10000))
-    print(f"🌐 Flask Server starting on port {port}")
-    app.run(host='0.0.0.0', port=port)
+    # Start subscription checker
+    sub_check_thread = Thread(target=check_expired_subscriptions)
+    sub_check_thread.daemon = True
+    sub_check_thread.start()
+    
+    # Start price updates
+    update_thread = Thread(target=send_price_updates)
+    update_thread.daemon = True
+    update_thread.start()
+    
+    # Start bot
+    bot_polling()
